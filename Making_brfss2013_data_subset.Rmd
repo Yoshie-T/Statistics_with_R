@@ -1,0 +1,32 @@
+---
+title: "Making a data subset"
+author: "Yoshie-T"
+date: "12/16/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r cars}{r load-packages, message=FALSE}
+library(dplyr)
+library(ggplot2)
+```
+
+### Load data
+
+```{r load-data}
+load("brfss2013.RData")
+```
+to view column names,
+```{r view column names}
+names(brfss2013)
+```
+
+```{r}
+#making a data subset
+sub_brfss2013 <- brfss2013 %>%
+  select(X_state, genhlth, physhlth, menthlth, hlthpln1, medcost, persdoc2, employ1)
+```
+
