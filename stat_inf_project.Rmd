@@ -1,0 +1,355 @@
+---
+title: "Hope for the future - Statistical inference with the GSS data"
+author: "Yoshie Toriya"
+date: "01/27/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+The General Social Survey (GSS) is part of a continuing study of American public opinion and values that began in 1972. The GSS aims to gather data on contemporary American society in order to monitor and explain trends and constants in attitudes, behaviors, and attributes; to examine the structure and functioning of society in general as well as the role played by relevant subgroups; to compare the United States to other societies in order to place American society in comparative perspective and develop cross-national models of human society; and to make high-quality data easily accessible to scholars, students, policy makers, and others, with minimal cost and waiting. <br>
+
+GSS questions cover a diverse range of issues including national spending priorities, marijuana use, crime and punishment, race relations, quality of life, confidence in institutions, and sexual behavior.
+
+
+## Setup
+
+### Load packages
+
+In this analysis we will explore the data using the `dplyr` package and visualize it 
+using the `ggplot2` package for data visualization, and a function for crosstab. 
+
+Let's load the packages and the dataset.
+
+```{r load-packages, message = FALSE}
+library(ggplot2)
+library(dplyr)
+library(statsr)
+library(knitr)
+library(graphics)
+source("http://pcwww.liv.ac.uk/~william/R/crosstab.r") 
+```
+
+### Load data
+
+```{r load-data}
+load("gss.Rdata")
+```
+
+```{r variables}
+str(gss)
+```
+
+Also, with below, the provided dataset covers surveys of from 1972 to 2012.
+```{r year}
+gss %>%
+  group_by(year) %>%
+  summarise(count = n())
+```
+There are 114 variables including:<br>
+- 28 personal background & family info<br>
+- 15 attitudinal towards social problem spending<br>
+- 13 societal concerns, as confidence in institutions<br>
+- 21 workplace and economic concerns<br>
+-  4 government's responsibilities<br>
+
+Details of variables and levels are also listed  [here](https://d3c33hcgiwev3.cloudfront.net/_8abbe344133a7a8c98cfabe01a5075c2_gss.html?Expires=1611273600&Signature=kVWIwF0HBllV-KvU3TxeXR0xbNEaA8~G8RJtSXBUgYivs-Z85HvawZ3djznYuqDl9qaOXxa5vSorddHV63ZsMjXRBY4cfjAuOoMLYtvi74Clch50otstY1ucH0rRGF87krI38pZeNBjrr5qHhoHqDYIAQOL8wfvwU41u3F6xSFo_&Key-Pair-Id=APKAJLTNE6QMUY6HBC5A#sei).
+
+
+* * *
+
+## Part 1: Data collection & Generalizability/Causality
+
+The GSS selects random household addresses across the United States then randomly select an adult member of the household to complete the interview in order for the observations to represent a cross-section of the country; therefore, the results of the survey are scientifically valid. In this context, we can assume the results are generalizable. As for causality, the survey is not designed to identify causality.
+
+I have also checked some basics, such as the ethnicity and the citizenship status. The ethnicity breakdown is approximately aligned with that from the [census](https://www.census.gov/quickfacts/fact/table/US/PST045219).
+
+```{r ethicity}
+gss %>%
+  filter(year == 2012) %>%
+  group_by(race) %>%
+  summarise(count = n())
+```
+Regarding US citizenship, however, majority did not answer and thus, it should not concern this analysis.
+
+```{r citizen}
+gss %>%
+  filter(year == 2012) %>%
+  group_by(uscitzn) %>%
+  summarise(count = n())
+```
+
+* * *
+
+## Part 2: Research question
+
+As noted, this data contains 114 variables including:<br>
+- 28 personal background & family info<br>
+- 15 attitudinal towards social problem spending<br>
+- 13 societal concerns, as confidence in institutions<br>
+- 21 workplace and economic concerns<br>
+-  4 government's responsibilities<br>
+
+What is interesting to me is respondents' perceptions of their standard of living (SOL) compared to their parents', and of their childrens' compared to their own. Assuming that users of this survey data are working with or for societal institutions to make the present and/or future better, I set the research question of this analysis as: <br>
+***Are respondents' perceptions of their childrens' standard of living associated with, or independent from, their confidence in the societal institutions?***
+<br>
+Among the thirteen societal institutions from the survey, I am going to focus on Congress and Science, the reason of which is in the following EDA.
+
+Note that in this analysis the available dataset provides the 2012 survey as the most recent one, which is now nearly a decade old. Thus, the outcome of this analysis is reflective of that time and not necessarily the present (or 2021).
+
+* * *
+
+## Part 3: Exploratory data analysis
+
+I first looked at the general background variables such as political views and income, which can be found at the Appendix at the end of this page. While they are diverse among the observations of each year, there was not a significant shift seen over the years, which is why I focused on the 2012 observations only.
+
+Then, I made a sub-dataset with the thirteen confidence-related variables and the respondents of 2012, in which the perception of SOL for children is rearranged into three levels; "Better" to encapsulate Much Better or Somewhat Better, "Same" for About The Same, and "Worse" to encapsulate Somewhat Worse or Much Worse.
+
+```{r sub-dataset}
+confidence <- gss %>%
+  select(year, kidssol, race, income06, confinan, conbus, conclerg, coneduc, confed, conlabor, conpress, conmedic, contv, conjudge, consci, conlegis, conarmy) %>% # including 13 confidence-related variables
+  filter(year == 2012 & !is.na(kidssol))
+```
+
+```{r add var}
+confidence <- confidence %>%
+  mutate(kidssol_type = ifelse((kidssol == "Much Better" | kidssol == "Somewhat Better"), "Better", NA))
+```
+
+```{r update var}
+confidence <- confidence %>%
+  mutate(kidssol_type = ifelse((kidssol == "Much Worse" | kidssol == "Somewhat Worse"), "Worse", kidssol_type)) %>%
+  mutate(kidssol_type = ifelse(kidssol == "About The Same", "Same", kidssol_type))
+```
+
+```{r sbubset}
+conf_kidssol_2012 <- confidence %>%
+  filter(!is.na(kidssol_type)) %>%
+  select(confinan, conbus, conclerg, coneduc, confed, conlabor, conpress, conmedic, contv, conjudge, consci, conlegis, conarmy, kidssol_type)
+```
+
+```{r sol}
+conf_kidssol_2012 %>%
+  group_by(kidssol_type) %>%
+  summarise(count = n())
+```
+
+There are thirteen variables, namely the institutions the questions are being addressed to: Banks and financial institutions, Major companies, Organized religion, Education, Executive branch of federal government, Organized labor, Media, TV, US Supreme Court, Science, Congress, and Army. <br>
+Responses, in terms of respondents' confidence in these institutions, are given in three levels: A Great Deal, Only Some, Hardly Any. 
+
+Interestingly, high confidence is seen towards Science, Medical, Education, and Army, while confidence is especially low towards Congress.  
+```{r con_congress}
+#Confidence in Congress in percentage
+crosstab(conf_kidssol_2012, row.vars = "kidssol_type", col.vars = "conlegis", type = "r")
+```
+
+```{r con_science}
+#Confidence in Science in percentage
+crosstab(conf_kidssol_2012, row.vars = "kidssol_type", col.vars = "consci", type = "r") 
+```
+
+```{r con_medicine}
+#Confidence in Medicine in percentage
+crosstab(conf_kidssol_2012, row.vars = "kidssol_type", col.vars = "conmedic", type = "r") 
+```
+
+```{r con_education}
+#Confidence in education in percentage
+crosstab(conf_kidssol_2012, row.vars = "kidssol_type", col.vars = "coneduc", type = "r") 
+```
+
+The rest of the responses can be found in the Appendix.
+
+I then analyzed the association or independence between SOL and confidence, using Congress as the low-performing institution and Science as a high-performing institution, with Chi-square testing.
+
+* * *
+
+## Part 4: Inference
+
+As this is to analyze the independence or association between the two categorical variables and at least one of them consists of more than two levels, Chi-square testing is the only method to apply. <br>
+
+First let's look at the SOL perspective vs confidence in Congress.  <br>
+
+Hypthesis is set as: <br>
+H0: SOL perspective and confidence in Congress are independent <br>
+HA: SOL perspective and confidence in Congress are dependent <br>
+
+Here are the observed values:
+```{r con_congress_count}
+#Confidence in Congress counts
+crosstab(conf_kidssol_2012, row.vars = "kidssol_type", col.vars = "conlegis", type = "f")
+```
+
+Based on above, the expected values for A Great Deal, Somewhat, Hardly Any, respectively, are: 
+
+SOL    | A Great Deal | Somewhat | Hardly Any 
+------ | ------------ | -------- | ----------
+Better | 42           | 276      | 295
+Same   | 16           | 105      | 113
+Worse  | 19           | 124      | 132
+<br>
+
+Now let's check that the required conditions are met: <br>
+1. Independence:  <br>
+We know the sample cases are selected randomly to represent the US population, and the sample size is less than 10% of the population We also know the two variables are not paired; thus, the scenarios are independent and each case only contributes to one cell in the table.  <br>
+2. Sample size/skew: <br>
+Each particular scenario has more than five expected cases. <br>
+
+As the conditions are met, let's proceed with obtaining the P-value. <br>
+
+<font size="1"> 
+$X^{2} = (57-42)^{2}/42+(294-276)^{2}/276+(262-295)^{2}/295+(14-16)^{2}/16+(114-105)^{2}/105+(106-113)^{2}/113+(6-19)^{2}/19+(97-124)^{2}/124+(172-132)^{2}/132$ </font>
+```{r x_square involving Congress}
+((57-42)*(57-42))/42+((294-276)*(294-276))/276+((262-295)*(262-295))/295+((14-16)*(14-16))/16+((114-105)*(114-105))/105+((106-113)*(106-113))/113+((6-19)*(6-19))/19+((97-124)*(97-124))/124+((172-132)*(172-132))/132
+```
+with that, we get P-value of
+```{r p-value_congress}
+pchisq(38.57262, 4, lower.tail = FALSE)
+```
+
+P-value is significantly close to zero, which means we can reject the null hypothesis and assume in favor of the alternative hypothesis that the SOL perspective and confidence in Congress are associated. <br>
+<br>
+<br>
+Now, let's analyze the institution that respondents have high confidence in: Science.
+```{r con_science_count}
+#Confidence in Science counts
+crosstab(conf_kidssol_2012, row.vars = "kidssol_type", col.vars = "consci", type = "f")
+```
+
+Based on above, the expected values for A Great Deal, Somewhat, Hardly Any, respectively, are: 
+
+SOL    | A Great Deal | Somewhat | Hardly Any
+------ | ------------ | -------- | ----------
+Better | 250          | 307      | 44
+Same   |  96          | 117      | 17
+Worse  | 110          | 135      | 20
+<br>
+Now let's check that the required conditions are met: <br>
+1. Independence:  <br>
+We know the sample cases are selected randomly to represent the US population, and the sample size is less than 10% of the population We also know the two variables are not paired; thus, the scenarios are independent and each case only contributes to one cell in the table. <br>
+2. Sample size/skew: <br>
+Each particular scenario has more than five expected cases. <br>
+ <br>
+As the conditions are met, let's proceed with obtaining the P-value. <br>
+
+<font size="1"> 
+$X^{2} = (255-250)^{2}/250+(295-307)^{2}/307+(51-44)^{2}/44+(104-96)^{2}/96+(116-117)^{2}/117+(10-17)^{2}/17+((96-110)^{2}/110+(148-135)^{2}/135+(20-20)^{2}/20$ </font>
+```{r x_square involving Science}
+((255-250)*(255-250))/250+((295-307)*(295-307))/307+((51-44)*(51-44))/44+((104-96)*(104-96))/96+((116-117)*(116-117))/117+((10-17)*(10-17))/17+((96-110)*(96-110))/110+((148-135)*(148-135))/135+((20-20)*(20-20))/20
+```
+with that, we get P-value of
+```{r p-value_science}
+pchisq(8.273928, 4, lower.tail = FALSE)
+```
+
+With this P-value of 0.08, we fail to reject the null hypothesis, thus we assume the SOL perspective is independence with their confidence in Science. 
+
+
+
+* * *
+
+## Summary
+
+This analysis suggests the association between the perspective of future SOL and lower confidence in Congress. Specifically, low confidence in Congress is seen among pessimists of the future. In contrast, the analysis also suggests independence between high confidence in Science and outlook on the future. This indicates that the central government needs to do better to earn people's confidence in order for them to feel hopeful about the future. However, these are only two indications and thus, there is still a need to take a closer looks into other scenarios. <br>
+<br>
+<br>
+<br>
+<br>
+
+### APPENDIX
+
+
+```{r race}
+gss_race_ <- gss %>%
+  select(year, race) %>%
+  group_by(year, race) %>%
+  summarise(count = n())
+```
+
+```{r plot_race}
+ggplot(gss_race_, aes(fill=race, x=year, y=count)) +
+  geom_bar(position="fill", stat="identity") +
+  theme(axis.text.x = element_text(angle = 45)) +
+  ggtitle("Responders' race") +
+  theme(plot.title = element_text(hjust = 0.5)) 
+```
+
+```{r polviews}
+gss_polviews_ <- gss %>%
+  select(year, polviews) %>%
+  group_by(year, polviews) %>%
+  summarise(count = n())
+```
+
+```{r plot_polviews}
+ggplot(gss_polviews_, aes(fill=polviews, x=year, y=count)) +
+  geom_bar(position="fill", stat="identity") +
+  theme(axis.text.x = element_text(angle = 45)) +
+  ggtitle("Responders' political views") +
+  theme(plot.title = element_text(hjust = 0.5)) 
+```
+
+```{r income}
+gss_income_ <- gss %>%
+  filter(year >= 2005 & income06 != "Refused" & !is.na(income06)) %>%
+  group_by(year, income06) %>%
+  summarise(count = n())
+```
+
+```{r plot_income}
+ggplot(gss_income_, aes(fill=income06, x=year, y=count)) +
+  geom_bar(position="fill", stat="identity") +
+  theme(axis.text.x = element_text(angle = 45)) +
+  ggtitle("Responders' income range") +
+  theme(plot.title = element_text(hjust = 0.5)) 
+```
+
+```{r con_fed_govt}
+#Confidence in executive branch of federal government in percentage
+crosstab(conf_kidssol_2012, row.vars = "kidssol_type", col.vars = "confed", type = "r") 
+```
+
+```{r con_religion}
+#Confidence in organized religion in percentage
+crosstab(conf_kidssol_2012, row.vars = "kidssol_type", col.vars = "conclerg", type = "r") 
+```
+
+```{r con_companies}
+#Confidence in major companies in percentage
+crosstab(conf_kidssol_2012, row.vars = "kidssol_type", col.vars = "conbus", type = "r") 
+```
+
+```{r co_fin}
+#Confidence in banks and financial institutions in percentage
+crosstab(conf_kidssol_2012, row.vars = "kidssol_type", col.vars = "confinan", type = "r") 
+```
+
+```{r con_labor }
+#Confidence in organized labor in percentage
+crosstab(conf_kidssol_2012, row.vars = "kidssol_type", col.vars = "conlabor", type = "r") #Organized Labor
+```
+
+```{r con_army}
+#Confidence in army in percentage
+crosstab(conf_kidssol_2012, row.vars = "kidssol_type", col.vars = "conarmy", type = "r") 
+```
+
+```{r con_supreme_court}
+#Confidence in US Supreme Court in percentage
+crosstab(conf_kidssol_2012, row.vars = "kidssol_type", col.vars = "conjudge", type = "r") 
+```
+
+```{r con_media}
+#Confidence in Media in percentage
+crosstab(conf_kidssol_2012, row.vars = "kidssol_type", col.vars = "conpress", type = "r") #Media
+```
+
+```{r con_tv}
+#Confidence in TV in percentage
+crosstab(conf_kidssol_2012, row.vars = "kidssol_type", col.vars = "contv", type = "r") 
+```
+
