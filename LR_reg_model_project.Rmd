@@ -1,0 +1,585 @@
+---
+title: "Modeling and prediction for movies - an introdcution to data science for a movie studio"
+author: "Yoshie Toriya"
+date: "02/17/2021"
+output: html_document
+---
+
+## Introduction
+
+I have just been hired as a data scientist at Paramount Pictures.
+
+My boss has just acquired data about how much audiences and critics like movies, as well as numerous other variables about the movies. This dataset is provided. It includes information from Rotten Tomatoes and IMDB for a random sample of movies. 
+
+My boss is interested in learning what attributes make a movie popular. She is also interested in learning something new about movies. She wants us to figure it all out.
+
+
+### Load packages and data
+In this project I will explore, visualize, model and infer the data and output using below packages. So let's load <br>
+```{r load-packages, message=FALSE}
+library(statsr)
+library(dplyr)
+library(ggplot2)
+library(GGally)
+library(tidyr)
+```
+and data 
+```{r load-data}
+load("movies.Rdata")
+```
+
+that consists of 651 observations with 32 variables:
+```{r variables}
+str(movies)
+```
+
+A codebook of 32 variables is also available [here](https://d3c33hcgiwev3.cloudfront.net/_73393031e98b997cf2445132f89606a1_movies_codebook.html?Expires=1613001600&Signature=ipwmmww~StghzPAUWBnO9DymG5slhwEFjiVvuAyWv5y8mkRoMGuPBLsii1vs0TSKuxynbK6Z3vieyFVgLHaMqq~i~IP5jGc7vNu6YG-V3783tD65trCd1Bo0VyAHpdm7fQFmsnI7QA~6cxJjzrWSJzY1bAfomTLFmdRDxk-QNvg_&Key-Pair-Id=APKAJLTNE6QMUY6HBC5A).
+
+
+* * *
+
+### Part 1: Data collection & Generalizability/Causality
+
+We are provided with the information that "This dataset includes information from Rotten Tomatoes and IMDB for a random sample of movies" regarding the collection of the data.<br>
+So based on it being "a random sample", we could say the results of the analysis could be generalizable. It might also sound otherwise by mentioning Rotten Tomatoes and IMDB, but it does NOT say the data collection was "limited" from their users but merely "included" them, so with no further information I would not deny the generalizability.
+Causality, however, can be denied as the data collection does not involve random assignment. 
+<br>
+<br>
+
+* * *
+
+### Part 2: Research question
+
+I believe it is well known, at least among us the data professionals, that data is extremely useful for predicting what will be a "hit" content, given [Netflix' making House of Cards](https://www.jigsawacademy.com/how-netflix-used-data-science-to-create-one-of-the-most-loved-shows-ever-house-of-cards/) as an example. Similarly, I would like to provide my boss with the predictors for smash hit contents for company's online streaming revenue growth within the capacity of this provided dataset. Therefore, my research question is **What is the parsimonious prediction model & what are the significant predictors the model should include**?
+
+
+* * *
+
+### Part 3: Exploratory data analysis
+
+My EDA begins with deciding the response variable, among "Audience score" on Rotten Tomatoes (RT), "Critics score" also on RT, and "IMDB rating" on IMDB. 
+
+First, on the basics; no null value in each of those variables, 
+```{r check-null-aud}
+sum(is.na(movies$audience_score)) 
+```
+
+```{r check-null-crit}
+sum(is.na(movies$critics_score)) 
+```
+
+```{r check-null-imdb}
+sum(is.na(movies$imdb_rating)) 
+```
+(There is one observation with na for "runtime", so I'm removing this one row and will work with new dataset "movies0".)
+```{r remove-na}
+movies0 <- movies %>% 
+  drop_na(runtime)
+```
+
+and the number of movie titles scored per year.
+```{r count}
+mov_count <- movies0 %>%
+  select(thtr_rel_year, title) %>%
+  group_by(thtr_rel_year) %>%
+  summarise(count = n())
+```
+
+```{r histo}
+ggplot(mov_count, aes(x=thtr_rel_year, y=count)) +
+  geom_histogram(stat="identity") +
+  theme(axis.text.x = element_text(angle = 45)) +
+  ggtitle("Count by year") +
+  theme(plot.title = element_text(hjust = 0.5)) 
+```
+<br>
+Looking at the years, I was curious whether the gap between the year of the release and that of the score provided (in other words, how later the movie was scored after its release) might be an influential factor. But, as that is unknown, I checked whether there's any association between the year of release and the score given (using "audience_score"):
+
+```{r year-genre }
+ggplot(data = movies0, aes(x = thtr_rel_year, y = audience_score)) +
+  geom_jitter() +
+  geom_smooth(method = "lm")
+```
+<br>
+The measurement as below, as well as the visualization above, does not support the idea of association.
+
+```{r }
+corr_01 = lm(audience_score ~ thtr_rel_year, data = movies0)
+summary(corr_01)
+```
+
+Next check is the association between "audience score" and "critics score",
+
+```{r scatter-score-audi_critics-line}
+ggplot(data = movies0, aes(x = critics_score, y = audience_score)) +
+  geom_jitter() +
+  geom_smooth(method = "lm")
+```
+
+```{r 02stat}
+corr_02 = lm(audience_score ~ critics_score, data = movies0)
+summary(corr_02)
+```
+
+Audience score could be collinear with critics score. With above, I wanted to make sure that the two show significant sign that is not the case. 
+
+Then also the association between "audience score" and "critics score",
+
+```{r scatter-score-RTaudi_imdb-line}
+ggplot(data = movies0, aes(x = imdb_rating, y = audience_score)) +
+  geom_jitter() +
+  geom_smooth(method = "lm")
+```
+```{r 03stat}
+corr_03 = lm(audience_score ~ imdb_rating, data = movies0)
+summary(corr_03)
+```
+
+There is strong association. I will choose "Audience Score" to be the predicted variable. While the collinearity among them suggest choosing any of them would not make a huge difference, the audience satisfaction is the ultimate goal of the business. And "critics_score" and "imdb_rating" will not be included as explanatory variables due to their strong association.<br>
+
+<br>
+Now onto explanatory variables.
+<br>
+Knowing the key predictors from the House of Cards example, I continued exploration with the following categorical variables:
+
+"Genre" 
+```{r eda-genre}
+movies0 %>%
+  select(title, genre, audience_score) %>%
+  group_by(genre) %>%
+  summarize(count = n(), mean = mean(audience_score), median = median(audience_score), min = min(audience_score), max = max(audience_score)) %>%
+  arrange(desc(count))
+```
+that shows interesting variability as below: 
+```{r, fig.width=12,fig.height=8}
+ggplot(movies0, aes(x = genre, y = audience_score, color = genre)) +
+    geom_boxplot()+
+  theme(axis.text.x = element_text(angle = 45, size = 9)) +
+  ggtitle("Audience score x Genre") +
+  theme(plot.title = element_text(hjust = 0.5)) 
+```
+<br>
+So does genre with "mpaa rating" (G, NC-17, PG, PG-13, R, etc.):    
+```{r fig.width=18,fig.height=12}
+ggplot(movies0, aes(x = mpaa_rating, y = audience_score, color = mpaa_rating)) +
+    geom_boxplot()+
+  theme(axis.text.x = element_text(angle = 45, size = 12)) +
+  theme(axis.text.y = element_text(size = 14)) +
+  ggtitle("Genre x mpaa Rating") +
+    facet_grid(.~genre)+
+  theme(plot.title = element_text(hjust = 0.5)) +
+  theme(legend.text = element_text(size = 12))
+```
+<br>
+which also shows interesting variance.
+<br>
+<br>
+How about "Studio"?:
+```{r eda-studio}
+movies0 %>%
+  select(title, audience_score, studio) %>%
+  group_by(studio) %>%
+  summarize(count = n(), mean = mean(audience_score), median = median(audience_score), min = min(audience_score), max = max(audience_score)) %>%
+  arrange(desc(count))
+```
+<br>
+There are 211 studios with my employer Paramount Pictures on top of the list. I plot the data narrowing down to the top 10 studios:
+```{r top10-studios}
+t10_studios <- movies0 %>%
+  filter((studio == "Paramount Pictures") | (studio == "Warner Bros. Pictures") | (studio == "Sony Pictures Home Entertainment") | (studio == "Universal Pictures")| (studio == "Warner Home Video") | (studio == "20th Century Fox") | (studio == "Miramax Films") | (studio == "MGM") | (studio == "Twentieth Century Fox Home Entertainment") | (studio == "IFC Films"))
+```
+
+```{r, fig.width=14,fig.height=10}
+ggplot(t10_studios, aes(x = studio, y = audience_score, color = studio)) +
+    geom_boxplot()+
+  theme(axis.text.x = element_text(angle = 45, size = 12)) +
+  theme(axis.text.y = element_text(size = 14)) +
+  ggtitle("Audience score x Studio") +
+  theme(plot.title = element_text(hjust = 0.5, size = 16)) +
+  theme(legend.text = element_text(size = 12))
+```
+<br>
+That shows the Universal Pictures tops with the highest median and IQR, Warner Bros. scores the second highest median. Twenties Century Fox Home Entertainment, with right-skewed variance, marks a higher median than Paramount.
+
+Further, studio with genre, shows where each studio is strong or not:
+```{r fig.width=18,fig.height=14}
+ggplot(t10_studios, aes(x = genre, y = audience_score, color = genre)) +
+    geom_boxplot()+
+  theme(axis.text.x = element_text(angle = 45, size = 8)) +
+  theme(axis.text.y = element_text(size = 12)) +
+  ggtitle("Studio x Genre") +
+    facet_grid(.~studio)+
+  theme(plot.title = element_text(hjust = 0.5, size = 16)) +
+  theme(legend.text = element_text(size = 12))
+```
+<br>
+For further exploration on the remaining variables, I conducted single predictor regressions (the r coding of which is in the Appendix that is at the end of this page). At this point I drop other review-relate, categorical variables (because they would not add value regardless, whether they are associated or contradict with numerical scores) with 5% significance cut off.
+
+explanatory var.  |  p-value      | Signif. codes:  (the more *, the smaller the p-value is)
+------------------|---------------|---------------------------------------------------------------
+title_type        |  2.225e-15    | ****
+genre             |  2.2e-16      | ****      
+runtime           |  3.431e-06    | ****
+mpaa_rating       |  1.145e-08    | ****
+studio            |  0.4618       |
+best_pic_nom      |  4.425e-08    | ****
+best_pic_win      |  0.003213     | *
+best_actor_win    |  0.645        |
+best_actress_win  |  0.5014       |
+best_dir_win      |  0.1634       | .
+top200_box        |  0.1825       | .
+director          |  0.008745     | **
+actor1            |  0.1156       | .
+actor2            |  0.4803       |
+actor3            |  0.1641       |
+actor4            |  0.8755       |
+actor5            |  0.1038       | .
+
+
+###### (Unlike what we know in House of Cards example as one of the significant predictors included was the lead actor, that is not the case with this dataset.)
+<br>
+
+Now I have the response variable, "Audience score", and the explanatory variables for the model in order of  significance indicated by the p-value; <br>
+genre, title_type, mpaa_rating, best_pic_nom, runtime, best_pic_win, director.
+<br>
+<br>
+
+* * *
+
+### Part 4: Modeling
+
+I am going to conduct forward selection with p-value, as my research purpose is to get a best lean model with significant predictors, by adding each explanatory variable at a time. <br>
+Starting with "genre":
+```{r model-01}
+mv_01 = lm(audience_score ~ genre , data = movies0)
+summary(mv_01)
+```
+Genre yields a very small p-value. <br>
+Now let's add "title_type":
+
+```{r model-02}
+mv_02 = lm(audience_score ~ genre + title_type , data = movies0)
+summary(mv_02)
+```
+ 
+ Title_type also yields p-values below 0.05. <br>
+ Now, with "mapp_rating":
+```{r model-03}
+mv_03 = lm(audience_score ~ genre + title_type + mpaa_rating, data = movies0)
+summary(mv_03)
+```
+
+One level of mpaa_rating yields p-value below 0.05. <br>
+Next, with "best_pic_nom":
+```{r model-04}
+mv_04 = lm(audience_score ~ genre + title_type + mpaa_rating + best_pic_nom, data = movies0)
+summary(mv_04)
+```
+
+"Best pic nom(inated)" yields a significantly small p-value here. <br>
+Moving on with "runtime":
+```{r model-05}
+mv_05 = lm(audience_score ~ genre + title_type + mpaa_rating + best_pic_nom + runtime, data = movies0)
+summary(mv_05)
+```
+Runtime also yields a very small p-value. <br>
+Now with "best_pic_win":
+```{r model-06}
+mv_06 = lm(audience_score ~ genre + title_type + mpaa_rating + best_pic_nom + runtime + best_pic_win, data = movies0)
+summary(mv_06)
+```
+
+"Best picture win(:yes)" yields a very large p-value, so let's remove it and add the last variable<br> "director":
+```{r model-06_2}
+mv_06_2 = lm(audience_score ~ genre + title_type + mpaa_rating + best_pic_nom + runtime + director, data = movies0)
+options(max.print=120) #Avoid printing too many director levels
+print(summary(mv_06_2), concise=TRUE)
+```
+Adding director has changed the p-values of "genre" and "mpaa_rating" to much larger figures, and specifically especially "runtime" to nearly 0.75. As they were indicated being more significant through the single predictor regression earlier, I would like to drop "director", but want to see what happens by removing "runtime". 
+
+```{r model-05_2}
+mv_05_2 = lm(audience_score ~ genre + title_type + mpaa_rating + best_pic_nom + director, data = movies0)
+options(max.print=120) #Avoid printing too many director levels
+print(summary(mv_05_2), concise=TRUE)
+```
+
+This has pushed the p-values of other variables over 0.05 or much larger (except for one level of "title_type") while they were indicated much more significant through single predictor regressions, therefore I go with removing "director" and putting back "runtime".
+
+```{r model-05-run-again}
+mv_05 = lm(audience_score ~ genre + title_type + mpaa_rating + best_pic_nom + runtime, data = movies0)
+summary(mv_05)
+```
+
+This is the final model. (Note also this model yields far larger F-statistic, that is interpreted that at least one of these five variables is significant.)
+
+<br>
+<br>
+As for an exercise purpose and to be sure of the selected model, I have also conduct the backward elimination with Adjusted R-squared.<br>
+The results of Adjusted R-squared are as below (with r coding in the Appendix):
+
+explanatory variables                                                                  | Adjusted R-squared  
+---------------------------------------------------------------------------------------| -------------------
+title_type + genre + runtime + mpaa_rating + best_pic_nom + best_pic_win + director    | 0.3977             
+title_type + genre + runtime + mpaa_rating + best_pic_nom + best_pic_win               | 0.2486             
+title_type + genre + runtime + mpaa_rating + best_pic_nom + director                   | 0.4018             
+title_type + genre + runtime + mpaa_rating + best_pic_nom                              | 0.2497             
+title_type + genre + runtime + mpaa_rating + director                                  | 0.336              
+title_type + genre + runtime + director                                                | 0.3112             
+title_type + genre + mpaa_rating + director                                            | 0.3235             
+title_type + genre + director                                                          | 0.3045             
+title_type + mpaa_rating + director                                                    | 0.3251   
+mpaa_rating + director                                                                 | 0.2837 
+genre + mpaa_rating + director                                                         | 0.2829                         
+
+Interestingly, if I had done this fitting with Adjusted R-squared only, I might choose the third model (with director) with the highest Adjusted R-squared. But since I do know the significance of each variable through the previous fitting with p-value, I am certain the final model I have chosen is a good model. 
+
+FYI: I also have the same list with F-statistic as follows: 
+
+explanatory variables                                                                  | Adjusted R-squared  | F-statistics
+---------------------------------------------------------------------------------------| --------------------|--------
+title_type + genre + runtime + mpaa_rating + best_pic_nom + best_pic_win + director    | 0.3977              | 1.78
+title_type + genre + runtime + mpaa_rating + best_pic_nom + best_pic_win               | 0.2486              | 11.73
+title_type + genre + runtime + mpaa_rating + best_pic_nom + director                   | 0.4018              | 1.794
+title_type + genre + runtime + mpaa_rating + best_pic_nom                              | 0.2497              | 12.37
+title_type + genre + runtime + mpaa_rating + director                                  | 0.336               | 1.6
+title_type + genre + runtime + director                                                | 0.3112              | 1.539
+title_type + genre + mpaa_rating + director                                            | 0.3235              | 1.567
+title_type + genre + director                                                          | 0.3045              | 1.523
+title_type + mpaa_rating + director                                                    | 0.3251              | 1.581        
+mpaa_rating + director                                                                 | 0.2837              | 1.48
+genre + mpaa_rating + director                                                         | 0.2829              | 1.469  
+
+
+While high F-statistic value does not assure the model is good, it indicates that at least one of the five predictors is significant. With this I stick with my selection of the model.
+<br>
+<br>
+<br>
+
+Now for Diagnosis - verifying whether the four conditions are met:
+<br>
+
+First for the linear relationship between x, which is runtime, the only numerical vaariable in the model, and y:
+
+```{r fig.width=18,fig.height=8}
+mv_05 = lm(audience_score ~ genre + title_type + mpaa_rating + best_pic_nom + runtime, data = movies0)
+plot(mv_05$residuals ~ movies0$runtime)
+```
+<br>
+It looks the residuals are randomly scattered around 0, meeting the condition.
+
+Next, for nearly normal residuals with mean 0:
+
+```{r fig.width=14,fig.height=8}
+hist(mv_05$residuals)
+qqnorm(mv_05$residuals)
+qqline(mv_05$residuals)
+```
+<br>
+while  the histogram looks a little skewed, we don't see it as a huge deviation in the probability plot, so this condition is also fairly satisfied.
+
+Next for constant variability of residuals:
+
+```{r fig.width=14,fig.height=10}
+plot(mv_05$residuals ~ mv_05$fitted)
+plot(abs(mv_05$residuals) ~ mv_05$fitted)
+```
+<br>
+It appears that the variability of the residual stays constant as the value of the predicted values change, not appearing fan-shaped in the residuals vs predicted plot nor triangle-shaped in the absolute residuals vs predicted plot, so the constant variability condition appears to be met.
+
+And lastly, 
+```{r fig.width=12,fig.height=10}
+plot(mv_05$residuals)
+```
+<br>
+Again, it does not show any sign of non-independent structure between x and y, so this condition appears to be met.
+<br>
+<br>
+
+##### Interpreting model coefficients
+
+Here are the coefficients of the model:
+
+coefficients                   | Est. Std.  | Error     | t value | Pr(>|t|)  
+-------------------------------|------------|-----------|---------|----------
+(Intercept)                    |  60.82454  |  8.77735  |  6.930  | 1.04e-11 
+genreAnimation                 |   3.91124  |  6.83693  |  0.572  | 0.567475    
+genreArt House & International |   8.93929  |  5.29007  |  1.690  | 0.091556   
+genreComedy                    |   0.36971  |  2.92044  |  0.127  | 0.899301    
+genreDocumentary               |  16.13026  |  6.97469  |  2.313  | 0.021061   
+genreDrama                     |  9.86635   | | 2.47376 |  3.988  | 7.43e-05 
+genreHorror                    |  -7.47383  |  4.37157  | -1.710  | 0.087824   
+genreMusical & Performing Arts |  20.17920  |  5.94678  |  3.393  | 0.000734 
+genreMystery & Suspense        |   0.58306  | 3.23566   |  0.180  | 0.857054    
+genreOther                     |   9.68009  | 4.96639   |  1.949  | 0.051724   
+genreScience Fiction & Fantasy |  -3.70046  |  6.24150  | -0.593  | 0.553475    
+title_typeFeature Film         | -11.48297  |  6.49600  | -1.768  | 0.077595   
+title_typeTV Movie             | -20.38764  | 10.22752  | -1.993  | 0.046647   
+mpaa_ratingNC-17               |  -9.92200  | 13.27348  | -0.748  | 0.455038    
+mpaa_ratingPG                  |  -9.61863  |  4.81300  | -1.998  | 0.046095   
+mpaa_ratingPG-13               | -15.31080  |  4.91618  | -3.114  | 0.001927  
+mpaa_ratingR                   |  -9.45234  |  4.76917  | -1.982  | 0.047917   
+mpaa_ratingUnrated             |  -5.66131  |  5.50860  | -1.028  | 0.304475    
+best_pic_nomyes                |  19.50843  | 3.97704   |  4.905  | 1.19e-06 
+runtime                        |   0.14214  | 0.03947   |  3.601  | 0.000341 
+
+
+Intercept of 60.82454 is the bottomline score a movie would get if all the values of categorical variables are of the reference level and runtime is 0. But it is nonsense to think that any movie would have 0 running time, so per additional 1 minute of runtime, y is expected to increase by 0.14214 if all else is held constant. 
+
+The remaining slopes can be interpreted as the following: we would expect y to be additionally higher by the figure of the respective slope if it is a positive number, or lower if it is a negative number. The slope does not apply (as 0 to be multiplied) if the value is a reference level. 
+<br>
+<br>
+<br>
+
+
+* * *
+
+### Part 5: Prediction
+
+Now I want to assess the model by predicting the score, so have picked [Hidden Figures](https://www.imdb.com/title/tt4846340/?ref_=fn_al_tt_1) among the 2016 movies as if for my boss' decision making on how much to promote it based on the prediction of how well received it will be. I made a dataframe with its data that is available at [IMDB](https://www.imdb.com/title/tt4846340/?ref_=fn_al_tt_1).
+
+```{r data-hidden_figures}
+hidden_figures <- data.frame(
+  title = c ("Hidden Figures"), 
+  title_type = c ("Feature Film"),
+  genre = c ("Drama"),
+  mpaa_rating = c ("PG"), 
+  runtime = c (127),
+  best_pic_nom = c ("yes"),
+  best_pic_win = c ("no"),
+  director = c ("Theodore Melfi")
+)
+print(hidden_figures)
+```
+And and predict the score as:
+
+```{r predict}
+prediction = predict.lm(mv_05, hidden_figures)
+prediction
+```
+
+Wow!
+At [Rotten Tomatoes](https://www.rottentomatoes.com/m/hidden_figures) it got the 4.4 points out of 5 which is equivalent of 88, so the predicted value is pretty right on. 
+<br>
+
+Now let's quantify this with prediction interval:
+```{r prediction-interval}
+predict(mv_05, hidden_figures, interval = "predict")
+```
+That can be interpreted that we are 95% confident that the audience score given to this movie will be in the range of 51.81914 and 122.4801. 
+<br>
+<br>
+<br>
+
+* * *
+
+### Part 6: Conclusion
+<br>
+
+The prediction model with five significant predictors - genre, title type, mpaa rating, runtime, best picture nomination, made based on the dataset of 651 observations and 32 variables - has predicted a fairly accurate score. That is a good result to the research question. <br>
+While this is also a small step to promote awareness for what data science can do across the organization as well as for my boss, I would also like to raise the following:
+<br>
+<br>
+***Opportunities:*** <br>
+- I must emphasize that the opportunities with prediction could go far beyond this, if I had the capabilities as Netflix does with millions of records of data. For example, their significant predictors include the lead actor and director (which assured Netflix show's success and signed a two-year contract without seeing a single episode) which I could not make work in this model.<br>
+- EDA shed light on where Paramount Pictures do well/poorly in comparison to its competitors. Future analysis and prediction can be aimed for suggesting whether they should pursue with their strengths or grow in their weak areas.
+<br>
+<br>
+***Challenges:*** <br>
+- The volume of data available is not the only significant factor but whole design, from data collection method and variables to collect, grouping samples, clustering audiences, time series analysis and so on, is required. <br>
+- I would like to analyze further with more numerical variables, such as the production budget, marketing budget, media exposures, etc., and to set more concrete predicted value (= goal), such as revenue, than the audience score on Rotten Tomatoes.<br>
+<br>
+<br>
+Again, for overall, this prediction attempt has demonstrated the capability for data science for the organization so my boss can speak out for it, and I look forward to being a ***significant*** one myself in it.
+<br>
+<br>
+<br>
+<br>
+<br>
+
+* * *
+
+### APPENDIX
+
+
+Just for reference, number of voices in IMDB is very skewed:
+```{r fig.width=6,fig.height=4}
+ggplot(movies, aes(x = imdb_num_votes)) + 
+  geom_histogram(bandwidth = 5)
+```
+
+
+EDA, each step of backward elimination with Adjusted R-squared:
+
+```{r full-model-backward-03_3}
+mv_b_03_3 = lm(audience_score ~ genre + mpaa_rating + director, data = movies)
+options(max.print = 120)
+print(summary(mv_b_03_3), concise=TRUE)
+```
+
+```{r full-model-backward-02}
+mv_b_02 = lm(audience_score ~ mpaa_rating + director, data = movies)
+options(max.print = 120)
+print(summary(mv_b_02), concise=TRUE)
+```
+
+```{r full-model-backward-03_2}
+mv_b_03_2 = lm(audience_score ~ title_type + mpaa_rating + director, data = movies)
+options(max.print = 120)
+print(summary(mv_b_03_2), concise=TRUE)
+```
+
+```{r full-model-backward-03}
+mv_b_03 = lm(audience_score ~ title_type + genre + director, data = movies)
+options(max.print = 120)
+print(summary(mv_b_03), concise=TRUE)
+```
+
+```{r full-model-backward-04_2}
+mv_b_04_2 = lm(audience_score ~ title_type + genre + mpaa_rating + director, data = movies)
+options(max.print = 120)
+print(summary(mv_b_04_2), concise=TRUE)
+```
+
+```{r full-model-backward-04}
+mv_b_04 = lm(audience_score ~ title_type + genre + runtime + director, data = movies)
+options(max.print = 120)
+print(summary(mv_b_04), concise=TRUE)
+```
+
+```{r full-model-backward-05_3}
+mv_b_05_3 = lm(audience_score ~ title_type + genre + runtime + mpaa_rating + director, data = movies)
+options(max.print = 120)
+print(summary(mv_b_05_3), concise=TRUE)
+```
+
+```{r full-model-backward-05_2}
+mv_b_05_2 = lm(audience_score ~ title_type + genre + runtime + mpaa_rating + director, data = movies)
+options(max.print = 120)
+print(summary(mv_b_05_2), concise=TRUE)
+```
+
+```{r full-model-backward-05}
+mv_b_05 = lm(audience_score ~ title_type + genre + runtime + mpaa_rating + best_pic_nom, data = movies)
+options(max.print = 120)
+print(summary(mv_b_05), concise=TRUE)
+```
+
+```{r full-model-backward-06_2}
+mv_b_06_2 = lm(audience_score ~ title_type + genre + runtime + mpaa_rating + best_pic_nom + director, data = movies)
+options(max.print = 120)
+print(summary(mv_b_06_2), concise=TRUE)
+```
+
+```{r full-model-backward-06}
+mv_b_06 = lm(audience_score ~ title_type + genre + runtime + mpaa_rating + best_pic_nom + best_pic_win, data = movies)
+options(max.print = 120)
+print(summary(mv_b_06), concise=TRUE)
+```
+
+```{r full-model-backward07}
+mv_b_07 = lm(audience_score ~ title_type + genre + runtime + mpaa_rating + best_pic_nom + best_pic_win + director, data = movies)
+options(max.print = 120)
+print(summary(mv_b_07), concise=TRUE)
+```
+
+End of document.
