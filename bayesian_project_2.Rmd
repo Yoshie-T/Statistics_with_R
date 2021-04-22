@@ -1,0 +1,430 @@
+---
+title: "Modeling and prediction for movies with Bayesian Regression Modeling"
+author: "Yoshie Toriya"
+date: "04/09/2021"
+output: html_document
+---
+
+## Introduction
+
+I am new as a data scientist at Paramount Pictures and my boss has acquired a dataset with which she expects me to present what attributes make a movie popular and how we can predict the popularity of the upcoming streaming release of movies. THe data includes information from Rotten Tomatoes and IMDB for a random sample of movies.
+
+### Load packages and data
+
+Let's load the packages
+```{r load-packages, message = FALSE}
+library(statsr)
+library(rlang)
+library(dplyr)
+library(ggplot2)
+library(BAS)
+library(GGally)
+library(gridExtra)
+library(tidyr)
+```
+and data
+```{r load-data}
+load("movies.Rdata")
+```
+that consists of 651 observations and 32 variables:
+```{r variable details}
+str(movies)
+```
+
+## Research question
+
+Question for this analysis is, what is the best model to predict audience score and what attributes should it include?<br>
+Note as it has been specified to develop a Bayesian regression model to predict `audience_score` from the following explanatory variables: `feature_film`,` drama`, `runtime`, `mpaa_rating_R`, `thtr_rel_year`, `oscar_season`, `summer_season`, `imdb_rating`, `imdb_num_votes`, `critics_score`, `best_pic_nom`, `best_pic_win`, `best_actor_win`, `best_actress_win`, `best_dir_win`, `top200_box`. 
+
+
+* * *
+
+## Part 1: Data collection & Generalizability/Causality
+
+We are provided with the information that “This dataset includes information from Rotten Tomatoes and IMDB for a random sample of movies” regarding the collection of the data.
+So based on it being “a random sample”, we could say the results of the analysis could be generalizable. It might also sound otherwise by mentioning Rotten Tomatoes and IMDB, but it does NOT say the data collection was “limited” from their users but merely “included” them, so with no further information I would not deny the generalizability. Causality, however, can be denied as the data collection does not involve random assignment.
+
+* * *
+
+## Part 2: Data manipulation
+
+The following variables are not in the provided dataset, so need to be created:
+```{r new_variables} 
+movies <- movies %>%
+ mutate(feature_film = if_else(title_type == "Feature Film", "yes", "no"))
+movies <- movies %>%
+ mutate(drama = if_else(genre == "Drama", "yes", "no"))
+movies <- movies %>%
+ mutate(mpaa_rating_R = if_else(mpaa_rating == "R", "yes", "no") )
+movies <- movies %>%
+ mutate(oscar_season = if_else((thtr_rel_month >= 10 & thtr_rel_month <= 12), "yes", "no"))
+movies <- movies %>%
+ mutate(summer_season = if_else((thtr_rel_month >= 5 & thtr_rel_month <= 8), "yes", "no"))
+```
+
+
+* * *
+
+## Part 3: Exploratory data analysis
+
+This EDA is aimed to answer the "what attributes should the prediction modeling include?" part of the research question.
+
+First I want to understand the year variable.
+```{r count per year}
+mov_count <- movies %>%
+  select(thtr_rel_year, title) %>%
+  group_by(thtr_rel_year) %>%
+  summarise(count = n()) 
+```
+
+```{r plot_year, fig.width=8, fig.height=5}
+ggplot(mov_count, aes(x=thtr_rel_year, y=count)) +
+  geom_histogram(stat="identity") +
+  theme(axis.text.x = element_text(angle = 45)) +
+  ggtitle("Count by year") +
+  theme(plot.title = element_text(hjust = 0.5)) 
+```
+<br>The dataset covers movies with the release year ranged from 1970 to 2014.
+
+Looking at the years, I was curious whether the gap between the year of the release and that of the score provided (in other words, how later the movie was scored after its release) might be an influential factor. But, as that is unknown, I checked whether there’s any association between the year of release and the score given (using `audience_score`):
+```{r plot_corr1, fig.width=7, fig.height=4}
+ggplot(data = movies, aes(x = thtr_rel_year, y = audience_score)) +
+  geom_jitter() +
+  geom_smooth(method = "lm")
+```
+<br>The measurement as below, as well as the visualization above, does not support the idea of association.
+
+```{r corr summary}
+corr_01 = lm(audience_score ~ thtr_rel_year, data = movies)
+summary(corr_01)
+```
+<br>Next, I want to look into the seemingly similar score/rating variables such as `critics_score` or `imdb_rating`, whether there is association with `audience score`. First, with `critics_score`:
+```{r plot_corr, fig.width=7, fig.height=4}
+ggplot(data = movies, aes(x = critics_score, y = audience_score)) +
+  geom_jitter() +
+  geom_smooth(method = "lm")
+```
+```{r corr_02}
+corr_02 = lm(audience_score ~ critics_score, data = movies)
+summary(corr_02)
+```
+<br>It is showing strong association. 
+
+Next, with `imdb_rating`:
+```{r plot corr_02}
+ggplot(data = movies, aes(x = imdb_rating, y = audience_score)) +
+  geom_jitter() +
+  geom_smooth(method = "lm")
+```
+```{r corr_03}
+corr_03 = lm(audience_score ~ imdb_rating, data = movies)
+summary(corr_03)
+```
+<br>
+There is strong association between `audience_score` and `imdb_rating`, and `critics_score`. As so learned in the past, these variables with strong association should not be included in the model. There is high potential they are influential to one another.
+<br>
+<br>
+Now let's look into the newly constructed categorical variables:
+```{r plots, fig.width=7, fig.height=7}
+p1 <- ggplot(movies, aes(x=feature_film, y = audience_score, fill = feature_film))+
+  geom_boxplot(alpha = 0.7)+
+  theme_bw()+
+  labs(x = "Feature film", y= "Audience Score", fill = "feature_film")+ 
+  theme(axis.text.x=element_text(angle=90, hjust = 1, vjust = 0))+
+  theme(legend.position="none")+
+  scale_fill_brewer(palette="Set2")
+p2 <- ggplot(movies, aes(x=drama, y = audience_score, fill = drama))+
+  geom_boxplot(alpha = 0.7)+
+  theme_bw()+
+  labs(x = "Drama", y= "Audience Score", fill = "drama")+ 
+  theme(axis.text.x=element_text(angle=90, hjust = 1, vjust = 0))+
+  theme(legend.position="none")+
+  scale_fill_brewer(palette="Set2")
+p3 <- ggplot(movies, aes(x=mpaa_rating_R, y = audience_score, fill = mpaa_rating_R))+
+  geom_boxplot(alpha = 0.7)+
+  theme_bw()+
+  labs(x = "MPAA rating", y= "Audience Score", fill = "mpaa_rating_R")+ 
+  theme(axis.text.x=element_text(angle=90, hjust = 1, vjust = 0))+
+  theme(legend.position="none")+
+  scale_fill_brewer(palette="Set2")
+p4 <- ggplot(movies, aes(x=oscar_season, y = audience_score, fill = oscar_season))+
+  geom_boxplot(alpha = 0.7)+
+  theme_bw()+
+  labs(x = "Oscar season", y= "Audience Score", fill = "mpaa_rating_R")+ 
+  theme(axis.text.x=element_text(angle=90, hjust = 1, vjust = 0))+
+  theme(legend.position="none")+
+  scale_fill_brewer(palette="Set2")
+p5 <- ggplot(movies, aes(x=summer_season, y = audience_score, fill = summer_season))+
+  geom_boxplot(alpha = 0.7)+
+  theme_bw()+
+  labs(x = "Summer season", y= "Audience Score", fill = "summer_season")+ 
+  theme(axis.text.x=element_text(angle=90, hjust = 1, vjust = 0))+
+  theme(legend.position="none")+
+  scale_fill_brewer(palette="Set2")
+grid.arrange(p1, p2, p3, p4, p5, nrow = 3)
+```
+<br>
+We can see clear difference between levels among 'feature_film' and 'drama'.
+
+Here is also one with the provided variables:
+```{r, fig.width=14,fig.height=9}
+ggplot(movies, aes(x = mpaa_rating, y = audience_score, color = mpaa_rating)) +
+    geom_boxplot()+
+  theme(axis.text.x = element_text(angle = 45, size = 12)) +
+  theme(axis.text.y = element_text(size = 14)) +
+  ggtitle("Genre x mpaa Rating") +
+    facet_grid(.~genre)+
+  theme(plot.title = element_text(hjust = 0.5)) +
+  theme(legend.text = element_text(size = 12))
+```
+<br>
+that indicates why 'drama' and 'mpaa_rating'(R) are of the interest; in my interpretation the drama scores high in score and volume, and R-rated marks relatively higher.
+
+<br>
+Now for the modeling, as mentioned earlier I will proceed with a reduced dataset without `imdb_rating`, `imdb_num_votes`, and `critics_score`.
+
+```{r reduced dataset}
+#dataset with 16 explanatory variables
+movies_red <- movies %>%
+        select(audience_score, feature_film, drama, runtime, mpaa_rating_R, thtr_rel_year, oscar_season, summer_season, best_pic_nom, best_pic_win, best_actor_win, best_actress_win, best_dir_win, top200_box)
+```
+<br>before moving on, let's see if any cleansing would be helpful - let's check any in the selected variables:
+```{r check na}
+sapply(movies_red, function(x) sum(is.na(x)))
+```
+<br>that points `runtime` has NA.
+```{r check row with null runtime}
+movies_red %>%
+  select(runtime) %>%
+  filter(is.na(runtime))
+```
+<br>since there is only 1 out of 651, I am going to remove the 1 observation
+```{r drop the row with null runtime}
+movies_red <- movies_red %>%
+  drop_na(runtime)
+```
+<br>
+Here is the quick summary of the dataset that is going to be used for modeling:
+```{r movies_red summ}
+summary(movies_red)
+```
+<br>
+This EDA has answered the "what attributes should the predictive modeling include?" part of the research question, and we are now moving on to answer the "what is the best model to predict audience score" part.
+
+* * *
+
+## Part 4: Modeling
+
+First, starting with the full model, using the bas.lim function and "BIC" that indicates the model is based on the non-informative reference prior:
+```{r bas full}
+#run regression model
+movies_red_bas = bas.lm(audience_score ~ ., data = movies_red, prior = "BIC", modelprior = Bernoulli(1), include.always = ~ ., n.models = 1)
+
+#extract posterior parameters of coefficients
+mv_rd.coef = coef(movies_red_bas)
+mv_rd.coef
+```
+<br>
+All values of post p(B != 0) being 1 in the above indicates that all variables are included in this model. Following is the distributions of coefficients,
+```{r plot coef}
+par(mar = c(1,1,1,1), mfrow = c(4,4), col.lab = "darkgrey", col.axis = "darkgrey", col = "darkgrey")
+plot(mv_rd.coef, subset = 2:14, ask = F)
+```
+<br>
+which visualizes the following credible intervals:
+
+```{r coef ci}
+confint(mv_rd.coef, parm = 2:17)
+```
+<br>
+The following summarizes this model with the *posterior means*, *posterior standard deviation*, *lower* and *higher* points of the *credible interval*:
+```{r coef summ}
+#
+out = confint(mv_rd.coef)[, 1:2]
+#extract the uppper and lower bounds of the credible intervals
+names = c("posterior mean", "posterior std", colnames(out))
+out = cbind(mv_rd.coef$postmean, mv_rd.coef$postsd, out)
+colnames(out) = names
+round(out, 5)
+```
+<br>
+Note that the later results will be compared to these values.
+
+<br>
+Next, we conduct the backward elimination with BIC, by starting with the full model and dropping one variable at a time to reach the smallest BIC with fewer predictors. (Note that AIC should read as BIC.)
+ 
+```{r backward elimination}
+n = nrow(movies_red) # of observations
+movies.lm = lm(audience_score ~ ., data = movies_red)
+# BIC elimination
+mv.step = step(movies.lm, k = log(n))
+```
+<br>
+The last block marks the smallest BIC (labeled as AIC) with predictors `runtime`, `drama`, `best_pic_nom`, `feature_film`, and removing any of which will increase the BIC value.
+
+<br>
+Now for the diagnostic purpose, let's look into the following:
+
+* Marginal posterior inclusion probabilities and see the remaining predictors get much lower marginal posterior inclusion probabilities.
+```{r marginal post incl prob with all}
+#using bas.lm to run the model
+mv.BIC = bas.lm(audience_score ~ ., data = movies_red, prior = "BIC", modelprior = uniform())
+mv.BIC
+```
+<br>
+* List the predictors with the largest logmarg which also corresponds.
+```{r logmarg based}
+#find the index of the model with the largest logmarg
+best = which.max(mv.BIC$logmarg)
+#retrieve the index of variables n the best model, with 0 as the index of the intercept
+bestmodel = mv.BIC$which[[best]]
+bestmodel
+```
+<br>
+* Using 1 to indicate the variable to include in the model
+```{r bestgamma}
+#create an indicator vector indicating which variables are used in the best model
+#first, create a 0 vector with the same dimension of the number of variables in the f
+bestgamma = rep(0, mv.BIC$n.vars)
+#Change the indicator to 1 when variables are used
+bestgamma[bestmodel + 1] = 1
+bestgamma
+```
+<br>
+All the above agree on the predictors, `feature_film`, `drama`, `runtime`, and `best_pic_nom` for the best model.
+
+
+Now we fit the best BIC model by imposing which variables to be used using the indicators
+```{r fit all}
+mv.bestBIC = bas.lm(audience_score ~ ., data = movies_red, prior = "BIC", n.models = 1, bestmodel = bestgamma, modelprior = uniform())
+
+#retrieve coefficients information
+mvBIC.coef = coef(mv.bestBIC)
+
+#retrieve bounds of credible intervals
+out = confint(mvBIC.coef)[, 1:2]
+#combine results and construct summary table
+mvBICcoef.BIC = cbind(mvBIC.coef$postmean, mvBIC.coef$postsd, out)
+names = c("post mean", "post sd", colnames(out)) 
+colnames(mvBICcoef.BIC) = names
+mvBICcoef.BIC
+```
+<br>
+All credible intervals of the four predictors became narrower compared to those in the full model we ran at first, meaning posterior standard deviations became smaller. It indicates that this is our parsimonious model based on BIC.
+
+
+In addition to BIC and narrower intervals that are good indicators, note that we could miss out other similarly good models, thus we evaluate by other criteria such as the posterior probability and Bayers factor.
+
+```{r model with 5 vars}
+mv_bas = bas.lm(audience_score ~ runtime + drama + best_pic_nom + feature_film, data = movies_red, prior = "BIC", modelprior = uniform())
+round(summary(mv_bas), 3)
+```
+<br>
+Posterior probability puts the model 1 on the far top, from the model 2, and the remaining models on the bottom with value 0. Bayes factor indicates that model 1 is the one and only.
+Also note that feature_film be included in all top 5 models.
+
+Here is also the marginal posterior inclusion probabilities, followed by log posterior odds:
+```{r marginal post incl prob 5 vars}
+print(mv_bas) # obtain marginal posterior inclusion probability
+```
+
+
+```{r vis}
+image(mv_bas, rotate = F) #visualization
+```
+<br>
+Log posterior odds indicate the log of Bayes factor. Black block indicates the respective predictor is excluded in the model. Therefore we see this results by Bayes factor are aligned with the results we have been seeing. 
+
+As the last step of diagnostic approach, we see the posterior distributions of the coefficients.
+```{r coef 4 vars}
+mv_bma.coef = coef(mv_bas)
+mv_bma.coef
+
+par(mfrow = c(1,4))
+plot(mv_bma.coef, subset = c(2:5))
+```
+<br>
+All the coefficients have small mass at 0 which indicates that they should be included in the model.
+
+
+With the above evaluation, we are good to move forward to prediction with the model `audience_score` ~ `feature_film` + `drama` + `runtime` + `best_pic_nom`.
+
+
+* * *
+
+## Part 5: Prediction
+
+Now we are to actually use the model for predicting the audience score. I have picked Hidden Figures among the 2016 movies. The data for the predictors is obtained at  [IMDB](https://www.imdb.com/title/tt4846340/?ref_=fn_al_tt_1), and the actual audience score from 
+[Rotten Tomatoes](https://www.rottentomatoes.com/m/hidden_figures).
+
+```{r create a new dataset}
+hidden_figures <- data.frame(
+  title = c ("Hidden Figures"), 
+  feature_film = c ("yes"),
+  drama = c ("yes"),
+  runtime = c (127),
+  best_pic_nom = c ("yes")
+)
+hidden_figures
+```
+
+```{r predict with model}
+predict_01 <- predict(mv_bas, newdata = hidden_figures, se.fit = TRUE, interval = "predict", estimator = "BMA")
+#to show results in a table
+predict_01_sum <- data.frame(
+  "Title" = c("Hidden Figures"), "Predicted audience score" = predict_01$Ybma, "Actual RT score" = c(93) )
+predict_01_sum
+```
+I am certain this is a fairly good result, given other possible influential variables that are not in this dataset, which I am going to talk about in my conclusion section.
+<br>
+<br>
+
+* * *
+
+## Part 6: Conclusion
+
+We can conclude that this process of modeling and prediction with Bayesian regression has worked sufficiently for the following reasons:
+* with the function which finds the best parsimonious model while presenting all other modeling and further elimination options
+* diagnostic approach looks thoroughly into the use of each predictor, by BIC, posterior probabilities, Bayes factor, and the distributions of coefficients <br>
+<br>
+It has answered the research question, the model to predict the audience score, with four predictors as `feature_film`, `drama`, `runtime`, `best_pic_nom` predictors, with which the test prediction outputs a fair result. 
+<br>
+<br>
+As for discussion for developing better models, I would raise the following: <br>
+<br>
+* **Prior parameters**<br>
+    For this round of modeling, noninformative reference proior was applied. As we continue gathering data and modeling, we can have better priors.<br>
+* **The choice of the response variable**<br>
+    In this dataset, choosing `audience_score` as a response variable is relevant. However, more objective measurement to predict that benefits filmmakers and the studio can be set.<br>
+* **Timing factor**<br>
+    It would be interesting if we had the original dataset, from which per-movie summary becomes one observation in this dataset. And if such dataset had timestamps of when the audience score was given. Then we could learn, for example; 1) if there is any correlation between the time (between the time of the release and that of the audience scoring) and the score (being lower or higher), 2) if the time of the audience score being given has any impact on the score given, for instance whether any new awareness to some social issue or the cast relating to the movie influences scores (for example, cancel culture impacting or not). <br>
+* **Credibility**<br>
+    Likewise, if we are to value the audience score as the response variable and if we had access to the detailed data, evaluating the credibility of score givers might be useful. So might another variable to indicate whether it was watched in the theater or via streamling be.
+<br>
+<br>
+<br>
+Thank you for your attention. We look forward to providing you with more findings from data.
+<br>
+<br>
+<br>
+
+* * *
+
+#### Appendix
+
+There are 211 stuios in the data. Here is a view of where our studio and others are doing:
+```{r t10studios}
+t10_studios <- movies %>%
+  filter((studio == "Paramount Pictures") | (studio == "Warner Bros. Pictures") | (studio == "Sony Pictures Home Entertainment") | (studio == "Universal Pictures")| (studio == "Warner Home Video") | (studio == "20th Century Fox") | (studio == "Miramax Films") | (studio == "MGM") | (studio == "Twentieth Century Fox Home Entertainment") | (studio == "IFC Films"))
+```
+
+```{r, fig.width=14,fig.height=10}
+ggplot(t10_studios, aes(x = genre, y = audience_score, color = genre)) +
+    geom_boxplot()+
+  theme(axis.text.x = element_text(angle = 45, size = 7)) +
+  theme(axis.text.y = element_text(size = 14)) +
+  ggtitle("Studio x Genre") +
+    facet_grid(.~studio)+
+  theme(plot.title = element_text(hjust = 0.5, size = 12)) +
+  theme(legend.text = element_text(size = 12))
+```

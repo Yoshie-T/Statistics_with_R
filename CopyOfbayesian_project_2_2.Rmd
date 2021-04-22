@@ -1,0 +1,257 @@
+---
+title: "Modeling and prediction for movies with Bayesian Regression Modeling"
+author: "Yoshie Toriya"
+date: "04/07/2021"
+output: html_document
+---
+
+## Introduction
+
+I am new as a data scientist at Paramount Pictures and my boss expects me to present what attributes make a movie popular with the data she has acquired. It includes information from Rotten Tomatoes and IMDB for a random sample of movies.
+
+### Load packages and data
+
+Let's load the packages
+```{r load-packages, message = FALSE}
+library(statsr)
+install.packages("rlang")
+library(rlang)
+library(dplyr)
+library(ggplot2)
+library(BAS)
+library(GGally)
+library(grid)
+library(tidyr)
+```
+and data
+```{r load-data}
+load("movies.Rdata")
+```
+that consists of 651 observations and 32 variables:
+```{r variable details}
+str(movies)
+```
+
+## Research question
+
+Question for this analysis is, what is the best model to predict audience score and what attributes should it include?<br>
+Note as it has been specified to develop a Bayesian regression model to predict `audience_score` from the following explanatory variables: `feature_film`,` drama`, `runtime`, `mpaa_rating_R`, `thtr_rel_year`, `oscar_season`, `summer_season`, `imdb_rating`, `imdb_num_votes`, `critics_score`, `best_pic_nom`, `best_pic_win`, `best_actor_win`, `best_actress_win`, `best_dir_win`, `top200_box`. 
+
+(NOTE) 
+Complete Bayesian model selection and report the final model. 
+
+Also perform model diagnostics and interpret coefficients of your final model in context of the data.
+
+
+* * *
+
+## Part 1: Data collection & Generalizability/Causality
+
+We are provided with the information that “This dataset includes information from Rotten Tomatoes and IMDB for a random sample of movies” regarding the collection of the data.
+So based on it being “a random sample”, we could say the results of the analysis could be generalizable. It might also sound otherwise by mentioning Rotten Tomatoes and IMDB, but it does NOT say the data collection was “limited” from their users but merely “included” them, so with no further information I would not deny the generalizability. Causality, however, can be denied as the data collection does not involve random assignment.
+
+* * *
+
+## Part 2: Data manipulation
+
+The following variables are not in the provided dataset, so need to be created:
+```{r new_variables} 
+movies <- movies %>%
+ mutate(feature_film = if_else(title_type == "Feature Film", "yes", "no"))
+movies <- movies %>%
+ mutate(drama = if_else(genre == "Drama", "yes", "no"))
+movies <- movies %>%
+ mutate(mpaa_rating_R = if_else(mpaa_rating == "R", "yes", "no") )
+movies <- movies %>%
+ mutate(oscar_season = if_else((thtr_rel_month >= 10 & thtr_rel_month <= 12), "yes", "no"))
+movies <- movies %>%
+ mutate(summer_season = if_else((thtr_rel_month >= 5 & thtr_rel_month <= 8), "yes", "no"))
+```
+
+
+* * *
+
+## Part 3: Exploratory data analysis
+
+My EDA begins with deciding the response variable, among “Audience score” on Rotten Tomatoes (RT), “Critics score” also on RT, and “IMDB rating” on IMDB.
+
+First, on the basics; no null value in each of those variables,
+```{r check values}
+sum(is.na(movies$audience_score)) 
+sum(is.na(movies$critics_score)) 
+sum(is.na(movies$imdb_rating)) 
+sum(is.na(movies$runtime)) 
+```
+
+We see there is one observation with na for “runtime”, so I’m removing this one row and will work with new dataset “movies0”.
+```{r drop the row with null runtime}
+movies0 <- movies %>%
+  drop_na(runtime)
+```
+
+and the number of movie titles scored per year.
+```{r count per year}
+mov_count <- movies0 %>%
+  select(thtr_rel_year, title) %>%
+  group_by(thtr_rel_year) %>%
+  summarise(count = n()) 
+```
+
+```{r plot count by year}
+ggplot(mov_count, aes(x=thtr_rel_year, y=count)) +
+  geom_histogram(stat="identity") +
+  theme(axis.text.x = element_text(angle = 45)) +
+  ggtitle("Count by year") +
+  theme(plot.title = element_text(hjust = 0.5)) 
+```
+
+
+```{r reduced dataset}
+#dataset with 16 explanatory variables
+movies_14var <- movies0 %>%
+        select(audience_score, feature_film, drama, runtime, mpaa_rating_R, thtr_rel_year, oscar_season, summer_season, best_pic_nom, best_pic_win, best_actor_win, best_actress_win, best_dir_win, top200_box)
+```
+
+
+Here is the quick summary of the data:
+```{r }
+summary(movies_14var)
+```
+
+
+```{r bas}
+#run regression model
+movies_red_bas14 = bas.lm(audience_score ~ ., data = movies_14var, prior = "BIC", modelprior = Bernoulli(1), include.always = ~ ., n.models = 1)
+
+#extract posterior parameters of coefficients
+mv_rd.coef14 = coef(movies_red_bas14)
+mv_rd.coef14
+```
+
+```{r }
+par(mar = c(1,1,1,1), mfrow = c(4,4), col.lab = "darkgrey", col.axis = "darkgrey", col = "darkgrey")
+plot(mv_rd.coef14, subset = 2:17, ask = F)
+```
+
+```{r }
+confint(mv_rd.coef14, parm = 2:17)
+```
+
+```{r}
+#
+out14 = confint(mv_rd.coef14)[, 1:2]
+#extract the uppper and lower bounds of the credible intervals
+names14 = c("posterior mean", "posterior std", colnames(out14))
+out14 = cbind(mv_rd.coef14$postmean, mv_rd.coef14$postsd, out14)
+colnames(out14) = names14
+round(out14, 5)
+```
+
+
+* * *
+
+## Part 4: Modeling
+
+NOTE: Insert code chunks as needed by clicking on the "Insert a new code chunk" 
+button above. Make sure that your code is visible in the project you submit. 
+Delete this note when before you submit your work.
+
+```{r }
+n14 = nrow(movies_14var) # of observations
+movies14.lm = lm(audience_score ~ ., data = movies_14var)
+# BIC elimination
+mv.step = step(movies14.lm, k = log(n14))
+```
+note: AIC should read as BIC 
+```{r }
+#using bas.lm to run the model
+mv14.BIC = bas.lm(audience_score ~ ., data = movies_14var, prior = "BIC", modelprior = uniform())
+mv14.BIC
+```
+
+```{r }
+#find the index of the model with the largest logmarg
+best14 = which.max(mv14.BIC$logmarg)
+#retrieve the index of variables n the best model, with 0 as the index of the intercept
+bestmodel14 = mv14.BIC$which[[best14]]
+bestmodel14
+```
+
+```{r }
+#create an indicator vector indicating which variables are used in the best model
+#first, create a 0 vector with the same dimension of the number of variables in the f
+bestgamma14 = rep(0, mv14.BIC$n.vars)
+#Change the indicator to 1 when variables are used
+bestgamma[bestmodel14 + 1] = 1
+bestgamma
+```
+
+```{r }
+#fit the best BIC model by imposing which variables to be used using the indicators
+mv.bestBIC = bas.lm(audience_score ~ ., data = movies_red, prior = "BIC", n.models = 1, bestmodel = bestgamma, modelprior = uniform())
+
+#retrieve coefficients information
+mvBIC.coef = coef(mv.bestBIC)
+
+#retrieve bounds of credible intervals
+out = confint(mvBIC.coef)[, 1:2]
+#combine results and construct summary table
+mvBICcoef.BIC = cbind(mvBIC.coef$postmean, mvBIC.coef$postsd, out)
+names = c("post mean", "post sd", colnames(out)) 
+colnames(mvBICcoef.BIC) = names
+mvBICcoef.BIC
+```
+
+All credible intervals of the three predictors became narrower meaning smaller posterior standard deviations, and the positive ones shifted to right. It indicates that this is the parsimonious model.
+
+```{r }
+mv_bas = bas.lm(audience_score ~ imdb_rating + critics_score + runtime, data = movies_red, prior = "BIC", modelprior = uniform())
+round(summary(mv_bas), 3)
+print(mv_bas) # obtain marginal posterior inclusion probability
+image(mv_bas, rotate = F) #visualization
+```
+
+BMA
+```{r }
+mv_bma.coef = coef(mv_bas)
+mv_bma.coef
+
+par(mfrow = c(1,3))
+plot(mv_bma.coef, subset = c(2:4))
+```
+As the plot indicates, with a small mass at 0 and the intervals do not include 0, we can intepret that these predictors are to be included in the model.
+
+
+* * *
+
+## Part 5: Prediction
+
+Now I want to assess the model by predicting the score, so have picked Snowden among the 2016 movies. imdb_rating is obtained from [IMDB](https://www.imdb.com/title/tt3774114/?ref_=fn_al_tt_1) and critics_rating from 
+[Rotten Tomatoes](https://www.rottentomatoes.com/m/snowden).
+
+```{r create a new dataset}
+snowden <- data.frame(
+  title = c ("Snowden"), 
+  title_type = c ("Feature Film"),
+  genre = c ("Drama"),
+  runtime = c (134),
+  imdb_rating = c (7.3), 
+  critics_score = c (61)
+)
+snowden
+```
+
+```{r predict with model}
+predict_01 <- predict(mv_bas, newdata = snowden, se.fit = TRUE, interval = "predict", estimator = "BMA")
+#to show results in a table
+predict_01_sum <- data.frame(
+  "Title" = c("Snowden"), "Predicted audience score" = predict_01$Ybma, "Actual RT score" = c(70) )
+predict_01_sum
+```
+Pretty good
+
+* * *
+
+## Part 6: Conclusion
+
+
