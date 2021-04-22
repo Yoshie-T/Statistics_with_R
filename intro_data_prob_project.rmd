@@ -1,0 +1,267 @@
+---
+title: "Exploring the BRFSS 2013 data for health condition overview"
+output: 
+  html_document: 
+    fig_height: 4
+    highlight: pygments
+    theme: spacelab
+---------------
+
+
+## Introduction
+
+The Behavioral Risk Factor Surveillance System (BRFSS), initiated in 1984, is a collaborative project between all of the states in the United States (US) and participating US territories and the Centers for Disease Control and Prevention (CDC). Its objective is to collect uniform, state-specific data on preventive health practices and risk behaviors that are linked to chronic diseases, injuries, and preventable infectious diseases that affect the adult population.
+
+
+## Setup
+
+### Load packages 
+
+In this lab we will explore the data using the `dplyr` package and visualize it 
+using the `ggplot2` package for data visualization. 
+
+Let's load the packages.
+```{r load-packages, message=FALSE}
+library(dplyr)
+library(ggplot2)
+```
+
+### Load data
+
+```{r load-data}
+load("brfss2013.RData")
+```
+to view column names,
+```{r view column names}
+names(brfss2013)
+```
+
+```{r }
+sub_brfss2013 <- brfss2013 %>%
+  select(X_state, genhlth, physhlth, menthlth, hlthpln1, medcost, persdoc2, employ1)
+```
+
+* * *
+
+## Part 1: Data collection & Generalizability/Causality
+
+BRFSS has conducted both landline telephone- and cellular telephone-based surveys since 2011 where for landline telephone survey the data is collected from a randomly selected adult in a household and reside in private or college housing. However, the provided data set does not include observations from celler phone users - see Note below.
+
+As it means that the responders are limited to those who are at home/available during the hours the calls are being made or/and who are willing to take time for the survey, it does not represent the population, thus this sample offers lower generalizability. 
+As for causality, this study is not an experiment where random assignment is being conducted. Questionnaire is not designed to identify causality either.
+
+Note:
+  1) The provided BRFSS overview tells the data collection includes using cellular telephones but the there is no observation that answers Yes to '*Is this a cellular telephone?' 
+  2) Similarly, while the data collection is aimed from the residents aged 18 years old or older, 99.99% of observations are not age-verified, as well as the gender unknown. 
+
+* * *
+
+## Part 2: Research questions    
+As this dataset consists of various dimensions of variables, this exploration as a first step focues on the overview.
+
+**Research quesion 1:**
+What is the overview of the health conditions, defined as general health, and how it may differ per state? 
+
+####toll # This is very basic but informative for state's/national administrators to get an initial image as to work for improvements.
+
+**Research quesion 2:**
+Among those of Poor health, what are the physical or mental aspects and how concerning are they?
+
+##### Looking into the days of (feeling) Not Good as an indicator of severity should provide state's/national administrators some practical image with physical and mental aspects separately as to work for improvements.
+
+**Research quesion 3:**
+For those feeling Poor condition, how are they covered, by insurance and access to medical care?
+
+##### As to improve residents' health conditions it is crutial they can get medical care as needed, and not be kept from due to financial reasons. This reality should be known to the administrators so they know the issues and what/how to change to make improvements on people's health.
+
+
+* * *
+
+## Part 3: Exploratory data analysis
+
+The very basic exploration is available at [this page](https://d3c33hcgiwev3.cloudfront.net/_e34476fda339107329fc316d1f98e042_brfss_codebook.html?Expires=1607990400&Signature=fVHPYT8-1sswOC0bI6puSxWBVc7-saYrGVpyosCeEyZL8wFy1ZnisBrr6jOE4~15Doh091sR-qBiNV-cLDVDfb61nB8dge8IJNIFup3I4-Oy6T~D9IHhUChmY4eLKqM1g-LgWRx9tbn3GIvSqVAOPnqxn~tFizRJ13UnqJCPyPo_&Key-Pair-Id=APKAJLTNE6QMUY6HBC5A##persdoc2).
+
+EDA for the three research questions follows.
+
+**For Research quesion 1:**
+What is the overview of the health conditions, defined as general health, and how it may differ per state? 
+```{r }
+brfss2013 %>%
+  group_by(genhlth) %>%
+  summarise(count = n())
+```
+which should show
+# A tibble: 6 x 2
+  genhlth    count
+  <fct>      <int>
+1 Excellent  85482
+2 Very good 159076
+3 Good      150555
+4 Fair       66726
+5 Poor       27951
+6 NA          1985
+
+To visualize it in a plot, first prep the data.
+```{r data for plot}
+st_health <- brfss2013 %>%
+  select(X_state, genhlth) %>%
+  group_by(X_state, genhlth) %>%
+  summarise(count = n()) %>%
+  filter(X_state != 0, !is.na(genhlth))
+```  
+and plot per state.
+```{r plot general health per state}  
+ggplot(st_health, aes(fill=genhlth, x=X_state, y=count)) +
+  geom_bar(position="stack", stat="identity") +
+  theme(axis.text.x = element_text(angle = 90))
+```  
+For full-screen version, click the Zoom icon above under the Plots tab.
+
+We can see in this plot, that states such as Florida, Kansas, Nebraska, mark the top three of observations collected, which suggests their residents' availability to accommodae with the survey is higher than that of the residents in other states, which is not a representation of the population.
+
+Let us look at it in the percentile format.
+```{r plot percentile version}  
+ggplot(st_health, aes(fill=genhlth, x=X_state, y=count)) +
+  geom_bar(position="fill", stat="identity") +
+  theme(axis.text.x = element_text(angle = 90)) 
+``` 
+For full-screen version, click the Zoom icon above under the Plots tab.
+
+Ratio of Poor is higher among the southern states. Demographical variables, i.e. education, income, ethnicity, may suggests associations.
+
+
+**Research quesion 2:**
+Among Poor health, what are the physical or mental aspects?
+
+For Physical and Mental aspects, let's make summary dataframe foe ease of viewing, for how many days of the past 30 days there were:
+```{r Physical summary per state in a dataframe}
+Phys_days <- brfss2013 %>%
+  select(X_state, physhlth) %>%
+  filter((physhlth > 0) & (X_state != 0) & (physhlth <= 30)) %>%
+  group_by(X_state) %>%
+  summarise(mean = mean(physhlth), median = median(physhlth), sd = sd(physhlth), n = n())
+```
+
+```{r Mental summary per state in a dataframe}
+Mental_days <- brfss2013 %>%
+  select(X_state, menthlth) %>%
+  filter((menthlth > 0) & (X_state != 0) & (menthlth <= 30)) %>%
+  group_by(X_state) %>%
+  summarise(mean = mean(menthlth), median = median(menthlth), sd = sd(menthlth), n = n())
+```
+See the datasets Phys_days and Mental_days, basee on Not Good days in the past 30 days.
+
+For Visualization, put in the boxplot format:
+```{r physhlth: Number Of Days Physical Health Not Good, grouped by state}
+brfss2013 %>% 
+  select(X_state, physhlth) %>% 
+  filter(physhlth > 0, X_state != 0, physhlth < 60) %>%  #there is one outlier that is 60 thus eliminating it for the plot
+  ggplot(aes(X_state,`physhlth`)) +
+  geom_boxplot(alpha=0.3) +
+  scale_fill_brewer(palette="BuPu") +
+  theme(axis.text.x = element_text(angle = 90)) +
+  ggtitle("No of days Physical Health Not Good")
+```
+
+```{r menthlth: Number Of Days Mental Health Not Good, grouped by state}
+brfss2013 %>% 
+  select(X_state, menthlth) %>% 
+  filter(menthlth > 0, X_state != 0, menthlth <200) %>%  #there is one outlier in Alabame which is nearly 250, thus eliminating it
+  ggplot(aes(X_state,`menthlth`)) +
+  geom_boxplot() +
+  scale_fill_brewer(palette="BuPu") +
+  theme(axis.text.x = element_text(angle = 90)) +
+  ggtitle("No of days Mental Health Not Good")
+```
+
+We see, again, the sourthern states show higher means on both phsyical and mental aspects, while IQR varies among states. Puerto Rico shows a unique state on the mental aspect.
+
+
+
+**Research quesion 3:**
+For those feeling Poor condition, whether they are covered by insurance and access to medical care, or whehter they face the cost concern?
+
+```{r}
+brfss2013 %>%
+  select(genhlth, hlthpln1, medcost, persdoc2) %>% #healthcare coverage, personal doc, cost issue
+  filter((genhlth == "Poor") & (!is.na(hlthpln1))) %>%
+  group_by(hlthpln1) %>%
+  summarise(count = n())
+```
+# A tibble: 2 x 2 "Have a healthcare coverage?"
+  hlthpln1 count
+  <fct>    <int>
+1 Yes      24389
+2 No        3452
+
+```{r}
+brfss2013 %>%
+  select(genhlth, hlthpln1, medcost, persdoc2) %>% #healthcare coverage, personal doc, cost issue
+  filter((genhlth == "Poor") & (!is.na(persdoc2))) %>%
+  group_by(persdoc2) %>%
+  summarise(count = n())
+```
+# A tibble: 3 x 2. "Have one or more you think of as your personal doctor or health care provider"
+  persdoc2      count
+  <fct>         <int>
+1 Yes, only one 20189
+2 More than one  4803
+3 No             2821
+
+```{r}
+brfss2013 %>%
+  select(genhlth, hlthpln1, medcost, persdoc2) %>% #healthcare coverage, personal doc, cost issue
+  filter((genhlth == "Poor") & (!is.na(medcost))) %>%
+  group_by(medcost) %>%
+  summarise(count = n())
+```
+# A tibble: 2 x 2  "Could Not See Dr. Because Of Cost?"
+  medcost count
+  <fct>   <int>
+1 Yes      7493
+2 No      20292
+
+While 88% of observations are covered by insurance and 90% have one or more personal doctors, 27% could not see doctor because of cost. Below is to visualize it per state, with break down of employment status as an indicator of the finance viability.
+
+```{r medcost}
+medcost_emp <- brfss2013 %>% 
+  select(X_state, medcost, genhlth, employ1) %>%
+  filter(genhlth == "Poor", X_state != 0, medcost == "Yes") %>%  
+  group_by(X_state, employ1) %>%
+  summarise(count = n())
+```  
+
+```{r}
+medcost_emp %>%
+  group_by(employ1) %>%
+  summarise(sum = sum(count))
+```
+# A tibble: 9 x 2
+  employ1                            sum
+  <fct>                            <int>
+1 Employed for wages                 958
+2 Self-employed                      279
+3 Out of work for 1 year or more     606
+4 Out of work for less than 1 year   295
+5 A homemaker                        336
+6 A student                           57
+7 Retired                            915
+8 Unable to work                    3998
+9 NA                                  49
+
+Let's visualize it by state.
+```{r plot }  
+ggplot(medcost_emp, aes(fill=employ1, x=X_state, y=count)) +
+  geom_bar(position="stack", stat="identity") +
+  theme(axis.text.x = element_text(angle = 90))
+```  
+
+```{r plot percentile version}  
+ggplot(medcost_emp, aes(fill=employ1, x=X_state, y=count)) +
+  geom_bar(position="fill", stat="identity") +
+  theme(axis.text.x = element_text(angle = 90))
+``` 
+    
+
+Among the "Poor" health and "Could not see Dr. because of the cost", top label is Unable to work, followed by Employed for wages, Retired, and Out of work for 1 year or more. 
+This suggests that one of the keys to improve health condition is to tackle with their financial or environment conditions. Health issue may not be resolved just by advancement of medical advancement or available alternatives. 
